@@ -780,9 +780,12 @@ trait Api10JogosTrait
      * ============================================================================ */
 
     /**
-     * Validar autenticação do callback
+     * Validar autenticação do callback com segurança aprimorada
      * 
-     * Verifica se o agent_secret fornecido é válido
+     * Verifica:
+     * 1. Agent secret básico
+     * 2. Timestamp (proteção contra replay attacks)
+     * 3. HMAC signature (opcional, se fornecida)
      * 
      * @param \Illuminate\Http\Request $request
      * @return bool
@@ -790,11 +793,19 @@ trait Api10JogosTrait
     private static function Api10JogosValidateAuth($request): bool
     {
         try {
+            // CRÍTICO: Carregar credenciais ANTES de qualquer validação
             if (!self::Api10JogosGetCredential()) {
+                Log::error('Api10Jogos ValidateAuth: Failed to load credentials');
                 return false;
             }
             
-            // Aceitar secret via body ou header
+            // Verificar se as credenciais foram carregadas
+            if (empty(self::$secretKey)) {
+                Log::error('Api10Jogos ValidateAuth: Secret key is empty after loading');
+                return false;
+            }
+            
+            // 1. Validação básica - agent_secret (compatibilidade retroativa)
             $agent_secret = $request->input('agent_secret') ?? $request->header('X-Agent-Secret');
             
             if (empty($agent_secret)) {
@@ -812,6 +823,40 @@ trait Api10JogosTrait
                     'url' => $request->fullUrl()
                 ]);
                 return false;
+            }
+            
+            // 2. Validação de timestamp (proteção contra replay attacks)
+            $timestamp = $request->input('timestamp') ?? $request->header('X-Timestamp');
+            if (!empty($timestamp)) {
+                $currentTime = time();
+                $requestTime = intval($timestamp);
+                $timeDifference = abs($currentTime - $requestTime);
+                
+                // Janela de 5 minutos (300 segundos)
+                if ($timeDifference > 300) {
+                    Log::warning('Api10Jogos ValidateAuth: Timestamp expired', [
+                        'ip' => $request->ip(),
+                        'timestamp' => $timestamp,
+                        'time_diff' => $timeDifference
+                    ]);
+                    return false;
+                }
+            }
+            
+            // 3. Validação HMAC (se fornecida) - agora com self::$secretKey garantido
+            $hmac_signature = $request->header('X-HMAC-Signature');
+            if (!empty($hmac_signature)) {
+                $payload = json_encode($request->except(['agent_secret']));
+                $computed_hmac = hash_hmac('sha256', $payload, self::$secretKey);
+                
+                if (!hash_equals($computed_hmac, $hmac_signature)) {
+                    Log::error('Api10Jogos ValidateAuth: Invalid HMAC signature', [
+                        'ip' => $request->ip()
+                    ]);
+                    return false;
+                }
+                
+                Log::info('Api10Jogos ValidateAuth: HMAC validated successfully');
             }
             
             return true;
