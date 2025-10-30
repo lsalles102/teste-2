@@ -210,21 +210,39 @@ npm run build
 ## Banco de Dados
 
 ### Configuração Atual
-- **Tipo**: SQLite
-- **Arquivo**: `site/database/database.sqlite`
+- **Tipo**: PostgreSQL (Replit Neon) ou SQLite
+- **Arquivo SQLite**: `site/database/database.sqlite`
+- **PostgreSQL**: Disponível via DATABASE_URL
 
-### Migrar para PostgreSQL/MySQL
-1. Criar banco de dados
-2. Atualizar `.env`:
+### ⚠️ Importante: Migrations Limpas
+O projeto original contém migrations com erros estruturais. Para evitar problemas:
+
+**Use o caminho limpo de migrations criado em `database/migrations/api10jogos/`**
+
+```bash
+# Resetar banco e rodar apenas migrations essenciais
+cd site
+php artisan migrate:fresh --path=database/migrations/api10jogos --force
+
+# Popular com dados de teste
+php artisan db:seed --class=Api10JogosSeeder --force
+```
+
+Este caminho contém apenas as tabelas essenciais para a integração API 10 Jogos funcionar:
+- users, wallets, orders, games, games_keys, settings, currencies, sessions, etc.
+
+### Configurar .env para SQLite
+```env
+DB_CONNECTION=sqlite
+# O Laravel automaticamente usa database/database.sqlite
+```
+
+### Configurar .env para PostgreSQL Replit
 ```env
 DB_CONNECTION=pgsql
-DB_HOST=127.0.0.1
-DB_PORT=5432
-DB_DATABASE=seu_banco
-DB_USERNAME=seu_usuario
-DB_PASSWORD=sua_senha
+DATABASE_URL="${DATABASE_URL}"
+# As variáveis PGHOST, PGPORT, etc são fornecidas automaticamente pelo Replit
 ```
-3. Rodar migrations: `php artisan migrate --force`
 
 ### Tabelas Principais
 - `users` - Usuários do sistema
