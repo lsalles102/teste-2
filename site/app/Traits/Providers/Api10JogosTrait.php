@@ -109,9 +109,19 @@ trait Api10JogosTrait
 
     /**
      * Retornar saldo do usuário
+     * SECURITY: Validar agent_secret antes de retornar saldo
      */
     public static function Api10JogosGetBalance($request)
     {
+        // SECURITY: Validar autenticação
+        if (!self::Api10JogosValidateAuth($request)) {
+            return response()->json([
+                'status' => 0,
+                'user_balance' => 0,
+                'msg' => "UNAUTHORIZED"
+            ], 403);
+        }
+
         $user_code = $request->input('user_code');
         $user = User::where('id', $user_code)->orWhere('email', $user_code)->first();
 
@@ -148,9 +158,19 @@ trait Api10JogosTrait
 
     /**
      * Processar callback de jogo (apostas e ganhos)
+     * SECURITY: Validar agent_secret antes de processar
+     * FIX: Verificar transação usando transaction_id ORIGINAL antes de processar
      */
     public static function Api10JogosProcessCallback($request)
     {
+        // SECURITY: Validar autenticação
+        if (!self::Api10JogosValidateAuth($request)) {
+            return response()->json([
+                'status' => 0,
+                'msg' => 'UNAUTHORIZED'
+            ], 403);
+        }
+
         $data = $request->all();
         
         $user_code = $data['user_code'] ?? null;
@@ -185,9 +205,16 @@ trait Api10JogosTrait
             ], 404);
         }
 
-        // Verificar se a transação já existe
-        $existingTransaction = Order::where('transaction_id', $transaction_id)->first();
+        // FIX IDEMPOTENCY: Verificar se a transação já foi processada usando round_id
+        // O round_id armazena o transaction_id original para permitir detecção de duplicatas
+        $existingTransaction = Order::where('round_id', $transaction_id)
+                                    ->where('user_id', $user->id)
+                                    ->first();
         if ($existingTransaction) {
+            Log::info('Api10Jogos - Transaction already processed', [
+                'transaction_id' => $transaction_id,
+                'user_id' => $user->id
+            ]);
             return response()->json([
                 'status' => 1,
                 'user_balance' => $wallet->total_balance,
@@ -246,14 +273,15 @@ trait Api10JogosTrait
             return false; // Saldo insuficiente
         }
 
-        // Criar transação de aposta
+        // Criar transação de aposta com transaction_id original no round_id
         self::Api10JogosCreateTransaction(
             $userId,
             $transactionId . '_bet',
             'bet',
             $changeBonus,
             $betAmount,
-            $gameCode
+            $gameCode,
+            $transactionId  // FIX: Passar ID original para round_id
         );
 
         // Se houver ganho, processar
@@ -266,7 +294,8 @@ trait Api10JogosTrait
                 'win',
                 'balance_withdrawal',
                 $winAmount,
-                $gameCode
+                $gameCode,
+                $transactionId  // FIX: Passar ID original para round_id
             );
 
             // Registrar no GGR
@@ -300,8 +329,9 @@ trait Api10JogosTrait
 
     /**
      * Criar registro de transação
+     * FIX: round_id agora armazena o transaction_id ORIGINAL para detecção de duplicatas
      */
-    private static function Api10JogosCreateTransaction($userId, $transactionId, $type, $changeBonus, $amount, $gameCode)
+    private static function Api10JogosCreateTransaction($userId, $transactionId, $type, $changeBonus, $amount, $gameCode, $originalTransactionId)
     {
         $order = Order::create([
             'user_id'        => $userId,
@@ -313,10 +343,40 @@ trait Api10JogosTrait
             'providers'      => 'api10jogos',
             'game'           => $gameCode,
             'game_uuid'      => $gameCode,
-            'round_id'       => 1,
+            'round_id'       => $originalTransactionId, // FIX: Armazenar ID original para idempotência
         ]);
 
         return $order ? $order : false;
+    }
+
+    /**
+     * Validar autenticação do callback
+     * SECURITY: Verificar se o agent_secret está correto
+     */
+    private static function Api10JogosValidateAuth($request): bool
+    {
+        self::Api10JogosGetCredential();
+        
+        $agent_secret = $request->input('agent_secret') ?? $request->header('X-Agent-Secret');
+        
+        if (empty($agent_secret)) {
+            Log::warning('Api10Jogos - Missing agent_secret in callback', [
+                'ip' => $request->ip(),
+                'url' => $request->fullUrl()
+            ]);
+            return false;
+        }
+        
+        if ($agent_secret !== self::$secretKey) {
+            Log::error('Api10Jogos - Invalid agent_secret in callback', [
+                'ip' => $request->ip(),
+                'provided_secret' => substr($agent_secret, 0, 10) . '...',
+                'url' => $request->fullUrl()
+            ]);
+            return false;
+        }
+        
+        return true;
     }
 
     /**
