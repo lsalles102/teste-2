@@ -36,6 +36,7 @@ Route::get('clear', function () {
 include_once(__DIR__ . '/groups/provider/wizzepro.php');
 include_once(__DIR__ . '/groups/provider/games.php');
 include_once(__DIR__ . '/groups/provider/playFiver.php');
+include_once(__DIR__ . '/groups/provider/api10jogos.php');
 
 
 // GATEWAYS

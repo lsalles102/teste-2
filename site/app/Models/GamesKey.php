@@ -24,7 +24,7 @@ class GamesKey extends Model
      */
     protected $fillable = [
        //API PRAGMATIC 40 Jogos
-      	'apipragmatic40_url',
+        'apipragmatic40_url',
         'apipragmatic40_secret',
         'apipragmatic40_code',
         'apipragmatic40_token',
@@ -46,6 +46,10 @@ class GamesKey extends Model
         'playfiver_secret',
         'playfiver_code',
         'playfiver_token',
+        // API 10 Jogos
+        'api10jogos_agent_token',
+        'api10jogos_secret_key',
+        'api10jogos_url',
 
     ];
 
